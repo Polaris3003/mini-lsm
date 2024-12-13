@@ -11,6 +11,10 @@ pub type KeyVec = Key<Vec<u8>>;
 pub type KeyBytes = Key<Bytes>;
 
 impl<T: AsRef<[u8]>> Key<T> {
+    pub fn create(value: T) -> Self {
+        Key(value) // 提供一个公开的构造函数
+    }
+
     pub fn into_inner(self) -> T {
         self.0
     }

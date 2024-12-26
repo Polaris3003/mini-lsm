@@ -59,7 +59,7 @@ impl SsTableIterator {
 
     /// Create a new iterator and seek to the first key-value pair which >= `key`.
     pub fn create_and_seek_to_key(table: Arc<SsTable>, key: KeySlice) -> Result<Self> {
-        let (blk_idx, blk_iter) = Self::seek_to_key_inner(&table, &key.raw_ref())?;
+        let (blk_idx, blk_iter) = Self::seek_to_key_inner(&table, key.raw_ref())?;
         let iter = Self {
             blk_iter,
             table,
@@ -72,7 +72,7 @@ impl SsTableIterator {
     /// Note: You probably want to review the handout for detailed explanation when implementing
     /// this function.
     pub fn seek_to_key(&mut self, key: KeySlice) -> Result<()> {
-        let (blk_idx, blk_iter) = Self::seek_to_key_inner(&self.table, &key.raw_ref())?;
+        let (blk_idx, blk_iter) = Self::seek_to_key_inner(&self.table, key.raw_ref())?;
         self.blk_iter = blk_iter;
         self.blk_idx = blk_idx;
         Ok(())

@@ -1,11 +1,11 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::sync::Arc;
-use std::{io::Read, path::Path};
-
+use super::bloom::Bloom;
 use anyhow::Result;
 use bytes::BufMut;
+use std::sync::Arc;
+use std::{io::Read, path::Path};
 
 use super::{BlockMeta, FileObject, SsTable};
 use crate::{block::BlockBuilder, key::KeyBytes, key::KeySlice, lsm_storage::BlockCache};
@@ -18,6 +18,7 @@ pub struct SsTableBuilder {
     data: Vec<u8>,
     pub(crate) meta: Vec<BlockMeta>,
     block_size: usize,
+    key_hashes: Vec<u32>,
 }
 
 impl SsTableBuilder {
@@ -30,6 +31,7 @@ impl SsTableBuilder {
             last_key: Vec::new(),
             block_size,
             builder: BlockBuilder::new(block_size),
+            key_hashes: Vec::new(),
         }
     }
 
@@ -42,7 +44,8 @@ impl SsTableBuilder {
             self.first_key.clear();
             self.first_key.extend(key.raw_ref());
         }
-
+        self.key_hashes
+            .push(farmhash::fingerprint32(&key.raw_ref()));
         if self.builder.add(key, value) {
             self.last_key.clear();
             self.last_key.extend(key.raw_ref());
@@ -91,6 +94,13 @@ impl SsTableBuilder {
         let meta_offset = buf.len();
         BlockMeta::encode_block_meta(&self.meta, &mut buf);
         buf.put_u32(meta_offset as u32);
+        let bloom = Bloom::build_from_key_hashes(
+            &self.key_hashes,
+            Bloom::bloom_bits_per_key(self.key_hashes.len(), 0.01),
+        );
+        let bloom_offset = buf.len();
+        bloom.encode(&mut buf);
+        buf.put_u32(bloom_offset as u32);
         let file = FileObject::create(path.as_ref(), buf)?;
         Ok(SsTable {
             id,
@@ -101,7 +111,7 @@ impl SsTableBuilder {
             block_meta_offset: meta_offset,
             block_cache,
             max_ts: 0,
-            bloom: None,
+            bloom: Some(bloom),
         })
     }
 

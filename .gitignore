@@ -3,5 +3,3 @@
 sync-tmp/
 mini-lsm.db/
 lsm.db/
-mini-lsm-starter/src/tests
-mini-lsm-starter/src/tests.rs

@@ -1,9 +1,6 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-use anyhow::{bail, Result};
-use bytes::Bytes;
-use std::ops::Bound;
-
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::{
     iterators::{
         merge_iterator::MergeIterator, two_merge_iterator::TwoMergeIterator, StorageIterator,
@@ -11,10 +8,15 @@ use crate::{
     mem_table::MemTableIterator,
     table::SsTableIterator,
 };
+use anyhow::{bail, Result};
+use bytes::Bytes;
+use std::ops::Bound;
 
 /// Represents the internal type for an LSM iterator. This type will be changed across the tutorial for multiple times.
-type LsmIteratorInner =
-    TwoMergeIterator<MergeIterator<MemTableIterator>, MergeIterator<SsTableIterator>>;
+type LsmIteratorInner = TwoMergeIterator<
+    TwoMergeIterator<MergeIterator<MemTableIterator>, MergeIterator<SsTableIterator>>,
+    SstConcatIterator,
+>;
 
 pub struct LsmIterator {
     inner: LsmIteratorInner,

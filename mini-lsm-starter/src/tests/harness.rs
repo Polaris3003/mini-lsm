@@ -1,10 +1,10 @@
+use anyhow::{bail, Result};
+use bytes::Bytes;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::BTreeMap, ops::Bound, os::unix::fs::MetadataExt, path::Path, sync::Arc,
     time::Duration,
 };
-
-use anyhow::{bail, Result};
-use bytes::Bytes;
 
 use crate::{
     compact::{
@@ -217,7 +217,24 @@ pub fn sync(storage: &LsmStorageInner) {
     storage.force_flush_next_imm_memtable().unwrap();
 }
 
+pub fn start_structure_monitor(storage: Arc<MiniLsm>) -> Arc<AtomicBool> {
+    let should_stop = Arc::new(AtomicBool::new(false));
+    let should_stop_clone = should_stop.clone();
+
+    std::thread::spawn(move || {
+        while !should_stop_clone.load(Ordering::Relaxed) {
+            println!("\n=== Storage Structure Monitor ===");
+            storage.dump_structure();
+            println!("===============================\n");
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    });
+
+    should_stop
+}
+
 pub fn compaction_bench(storage: Arc<MiniLsm>) {
+    let monitor_control = start_structure_monitor(Arc::clone(&storage));
     let mut key_map = BTreeMap::<usize, usize>::new();
     let gen_key = |i| format!("{:010}", i); // 10B
     let gen_value = |i| format!("{:0110}", i); // 110B
@@ -262,7 +279,14 @@ pub fn compaction_bench(storage: Arc<MiniLsm>) {
         let value = storage.get(key.as_bytes()).unwrap();
         if let Some(val) = key_map.get(&i) {
             let expected_value = gen_value(*val);
-            assert_eq!(value, Some(Bytes::from(expected_value.clone())));
+            assert_eq!(
+                value,
+                Some(Bytes::from(expected_value.clone())),
+                "index:{}, key: {}, value: {:?}",
+                i,
+                key,
+                value
+            );
             expected_key_value_pairs.push((Bytes::from(key), Bytes::from(expected_value)));
         } else {
             assert!(value.is_none());
@@ -273,8 +297,10 @@ pub fn compaction_bench(storage: Arc<MiniLsm>) {
         &mut storage.scan(Bound::Unbounded, Bound::Unbounded).unwrap(),
         expected_key_value_pairs,
     );
-
-    storage.dump_structure();
+    // 测试结束前停止监控
+    monitor_control.store(true, Ordering::Relaxed);
+    std::thread::sleep(Duration::from_millis(100)); // 给监控线程一点时间退出
+                                                    /* storage.dump_structure(); */
 
     println!("This test case does not guarantee your compaction algorithm produces a LSM state as expected. It only does minimal checks on the size of the levels. Please use the compaction simulator to check if the compaction is correctly going on.");
 }

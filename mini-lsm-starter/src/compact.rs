@@ -4,6 +4,7 @@ mod leveled;
 mod simple_leveled;
 mod tiered;
 use crate::key::{Key, KeySlice};
+use crate::manifest::ManifestRecord;
 use anyhow::{Ok, Result};
 use chrono::Local;
 pub use leveled::{LeveledCompactionController, LeveledCompactionOptions, LeveledCompactionTask};
@@ -326,7 +327,7 @@ impl LsmStorageInner {
         );
 
         {
-            let _state_lock = self.state_lock.lock();
+            let state_lock = self.state_lock.lock();
             let mut snapshot = self.state.read().as_ref().clone();
             for file_to_add in sstables {
                 let result = snapshot.sstables.insert(file_to_add.sst_id(), file_to_add);
@@ -342,8 +343,12 @@ impl LsmStorageInner {
             }
             let mut state = self.state.write();
             *state = Arc::new(snapshot);
+            self.manifest
+                .as_ref()
+                .unwrap()
+                .add_record(&state_lock, ManifestRecord::Compaction(task, output))?;
         }
-
+        self.sync_dir()?;
         Ok(())
     }
 

@@ -71,7 +71,9 @@ impl SsTableBuilder {
             first_key: std::mem::take(&mut KeyBytes::from_bytes(self.first_key.clone().into())),
             last_key: std::mem::take(&mut KeyBytes::from_bytes(self.last_key.clone().into())),
         });
+        let checksum = crc32fast::hash(&encoded_block);
         self.data.extend(encoded_block);
+        self.data.put_u32(checksum);
     }
 
     /// Get the estimated size of the SSTable.

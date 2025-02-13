@@ -1,14 +1,13 @@
-#![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
-
-use anyhow::{bail, Context, Result};
-use bytes::{Buf, BufMut, Bytes};
-use crossbeam_skiplist::SkipMap;
-use parking_lot::Mutex;
 use std::fs::{File, OpenOptions};
 use std::hash::Hasher;
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 use std::sync::Arc;
+
+use anyhow::{bail, Context, Result};
+use bytes::{Buf, BufMut, Bytes};
+use crossbeam_skiplist::SkipMap;
+use parking_lot::Mutex;
 
 pub struct Wal {
     file: Arc<Mutex<BufWriter<File>>>,
@@ -16,10 +15,16 @@ pub struct Wal {
 
 impl Wal {
     pub fn create(path: impl AsRef<Path>) -> Result<Self> {
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
-        let file = Arc::new(Mutex::new(BufWriter::new(file)));
-
-        Ok(Self { file })
+        Ok(Self {
+            file: Arc::new(Mutex::new(BufWriter::new(
+                OpenOptions::new()
+                    .read(true)
+                    .create_new(true)
+                    .write(true)
+                    .open(path)
+                    .context("failed to create WAL")?,
+            ))),
+        })
     }
 
     pub fn recover(path: impl AsRef<Path>, skiplist: &SkipMap<Bytes, Bytes>) -> Result<Self> {
@@ -50,7 +55,9 @@ impl Wal {
             }
             skiplist.insert(key, value);
         }
-        Self::create(path)
+        Ok(Self {
+            file: Arc::new(Mutex::new(BufWriter::new(file))),
+        })
     }
 
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
@@ -66,14 +73,10 @@ impl Wal {
         buf.put_u16(value.len() as u16);
         buf.put_slice(value);
         hasher.write(value);
+        // add checksum: week 2 day 7
         buf.put_u32(hasher.finalize());
         file.write_all(&buf)?;
         Ok(())
-    }
-
-    /// Implement this in week 3, day 5.
-    pub fn put_batch(&self, _data: &[(&[u8], &[u8])]) -> Result<()> {
-        unimplemented!()
     }
 
     pub fn sync(&self) -> Result<()> {

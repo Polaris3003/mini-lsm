@@ -1,30 +1,26 @@
-#![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
-
 mod leveled;
 mod simple_leveled;
 mod tiered;
-use crate::key::{Key, KeySlice};
-use crate::manifest::ManifestRecord;
-use anyhow::{Ok, Result};
-use chrono::Local;
+
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::Result;
 pub use leveled::{LeveledCompactionController, LeveledCompactionOptions, LeveledCompactionTask};
 use serde::{Deserialize, Serialize};
 pub use simple_leveled::{
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, SimpleLeveledCompactionTask,
 };
-use std::collections::HashSet;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::sync::Arc;
-use std::time::Duration;
-use std::time::Instant;
 pub use tiered::{TieredCompactionController, TieredCompactionOptions, TieredCompactionTask};
 
 use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
+use crate::key::KeySlice;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
+use crate::manifest::ManifestRecord;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -208,7 +204,7 @@ impl LsmStorageInner {
                         upper_ssts.push(snapshot.sstables.get(id).unwrap().clone());
                     }
                     let upper_iter = SstConcatIterator::create_and_seek_to_first(upper_ssts)?;
-                    let mut lower_ssts = Vec::with_capacity(lower_level_sst_ids.len());
+                    let mut lower_ssts = Vec::with_capacity(upper_level_sst_ids.len());
                     for id in lower_level_sst_ids.iter() {
                         lower_ssts.push(snapshot.sstables.get(id).unwrap().clone());
                     }
@@ -251,14 +247,14 @@ impl LsmStorageInner {
                     task.compact_to_bottom_level(),
                 )
             }
-            _ => unimplemented!(),
         }
     }
 
     pub fn force_full_compaction(&self) -> Result<()> {
         let CompactionOptions::NoCompaction = self.options.compaction_options else {
-            panic!("full compaction can only be called with compaction is not enabled");
+            panic!("full compaction can only be called with compaction is not enabled")
         };
+
         let snapshot = {
             let state = self.state.read();
             state.clone()
@@ -270,23 +266,26 @@ impl LsmStorageInner {
             l0_sstables: l0_sstables.clone(),
             l1_sstables: l1_sstables.clone(),
         };
+
+        println!("force full compaction: {:?}", compaction_task);
+
         let sstables = self.compact(&compaction_task)?;
+        let mut ids = Vec::with_capacity(sstables.len());
 
         {
-            let _state_lock = self.state_lock.lock();
+            let state_lock = self.state_lock.lock();
             let mut state = self.state.read().as_ref().clone();
             for sst in l0_sstables.iter().chain(l1_sstables.iter()) {
                 let result = state.sstables.remove(sst);
                 assert!(result.is_some());
             }
-            let mut ids = Vec::with_capacity(sstables.len());
             for new_sst in sstables {
                 ids.push(new_sst.sst_id());
                 let result = state.sstables.insert(new_sst.sst_id(), new_sst);
                 assert!(result.is_none());
             }
             assert_eq!(l1_sstables, state.levels[0].1);
-            state.levels[0].1 = ids;
+            state.levels[0].1 = ids.clone();
             let mut l0_sstables_map = l0_sstables.iter().copied().collect::<HashSet<_>>();
             state.l0_sstables = state
                 .l0_sstables
@@ -296,10 +295,18 @@ impl LsmStorageInner {
                 .collect::<Vec<_>>();
             assert!(l0_sstables_map.is_empty());
             *self.state.write() = Arc::new(state);
+            self.sync_dir()?;
+            self.manifest.as_ref().unwrap().add_record(
+                &state_lock,
+                ManifestRecord::Compaction(compaction_task, ids.clone()),
+            )?;
         }
         for sst in l0_sstables.iter().chain(l1_sstables.iter()) {
             std::fs::remove_file(self.path_of_sst(*sst))?;
         }
+
+        println!("force full compaction done, new SSTs: {:?}", ids);
+
         Ok(())
     }
 
@@ -314,6 +321,7 @@ impl LsmStorageInner {
         let Some(task) = task else {
             return Ok(());
         };
+        self.dump_structure();
         println!("running compaction task: {:?}", task);
         let sstables = self.compact(&task)?;
         let output = sstables.iter().map(|x| x.sst_id()).collect::<Vec<_>>();
@@ -385,12 +393,14 @@ impl LsmStorageInner {
     }
 
     fn trigger_flush(&self) -> Result<()> {
-        if {
+        let res = {
             let state = self.state.read();
             state.imm_memtables.len() >= self.options.num_memtable_limit
-        } {
+        };
+        if res {
             self.force_flush_next_imm_memtable()?;
         }
+
         Ok(())
     }
 

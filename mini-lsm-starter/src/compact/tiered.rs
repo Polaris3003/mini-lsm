@@ -1,6 +1,8 @@
-use crate::lsm_storage::LsmStorageState;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
+use crate::lsm_storage::LsmStorageState;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TieredCompactionTask {
@@ -32,11 +34,12 @@ impl TieredCompactionController {
     ) -> Option<TieredCompactionTask> {
         assert!(
             snapshot.l0_sstables.is_empty(),
-            "should not add l0 ssts in tiered compaction",
+            "should not add l0 ssts in tiered compaction"
         );
         if snapshot.levels.len() < self.options.num_tiers {
             return None;
         }
+        // compaction triggered by space amplification ratio
         let mut size = 0;
         for id in 0..(snapshot.levels.len() - 1) {
             size += snapshot.levels[id].1.len();
@@ -45,7 +48,7 @@ impl TieredCompactionController {
             (size as f64) / (snapshot.levels.last().unwrap().1.len() as f64) * 100.0;
         if space_amp_ratio >= self.options.max_size_amplification_percent as f64 {
             println!(
-                "compaction triggered by space amp ratio: {}",
+                "compaction triggered by space amplification ratio: {}",
                 space_amp_ratio
             );
             return Some(TieredCompactionTask {
@@ -54,6 +57,7 @@ impl TieredCompactionController {
             });
         }
         let size_ratio_trigger = (100.0 + self.options.size_ratio as f64) / 100.0;
+        // compaction triggered by size ratio
         let mut size = 0;
         for id in 0..(snapshot.levels.len() - 1) {
             size += snapshot.levels[id].1.len();
@@ -75,6 +79,7 @@ impl TieredCompactionController {
                 });
             }
         }
+        // trying to reduce sorted runs without respecting size ratio
         let num_tiers_to_take = snapshot.levels.len() - self.options.num_tiers + 2;
         println!("compaction triggered by reducing sorted runs");
         return Some(TieredCompactionTask {

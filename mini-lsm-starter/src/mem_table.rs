@@ -1,19 +1,16 @@
-#![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
-
 use std::ops::Bound;
 use std::path::Path;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use bytes::Bytes;
-use clap::builder;
 use crossbeam_skiplist::map::Entry;
 use crossbeam_skiplist::SkipMap;
 use ouroboros::self_referencing;
 
 use crate::iterators::StorageIterator;
-use crate::key::{self, Key, KeySlice};
+use crate::key::{KeySlice, TS_DEFAULT};
 use crate::table::SsTableBuilder;
 use crate::wal::Wal;
 
@@ -39,9 +36,9 @@ pub(crate) fn map_bound(bound: Bound<&[u8]>) -> Bound<Bytes> {
 
 impl MemTable {
     /// Create a new mem-table.
-    pub fn create(_id: usize) -> Self {
+    pub fn create(id: usize) -> Self {
         Self {
-            id: _id,
+            id,
             map: Arc::new(SkipMap::new()),
             wal: None,
             approximate_size: Arc::new(AtomicUsize::new(0)),
@@ -60,7 +57,7 @@ impl MemTable {
 
     /// Create a memtable from WAL
     pub fn recover_from_wal(id: usize, path: impl AsRef<Path>) -> Result<Self> {
-        let map: Arc<SkipMap<Bytes, Bytes>> = Arc::new(SkipMap::new());
+        let map = Arc::new(SkipMap::new());
         Ok(Self {
             id,
             wal: Some(Wal::recover(path.as_ref(), &map)?),
@@ -86,15 +83,14 @@ impl MemTable {
     }
 
     /// Get a value by key.
-    pub fn get(&self, _key: &[u8]) -> Option<Bytes> {
-        self.map.get(_key).map(|e| e.value().clone())
+    pub fn get(&self, key: &[u8]) -> Option<Bytes> {
+        self.map.get(key).map(|e| e.value().clone())
     }
 
     /// Put a key-value pair into the mem-table.
     ///
     /// In week 1, day 1, simply put the key-value pair into the skipmap.
     /// In week 2, day 6, also flush the data to WAL.
-    /// In week 3, day 5, modify the function to use the batch API.
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
         let estimated_size = key.len() + value.len();
         self.map
@@ -105,11 +101,6 @@ impl MemTable {
             wal.put(key, value)?;
         }
         Ok(())
-    }
-
-    /// Implement this in week 3, day 5.
-    pub fn put_batch(&self, _data: &[(KeySlice, &[u8])]) -> Result<()> {
-        unimplemented!()
     }
 
     pub fn sync_wal(&self) -> Result<()> {
@@ -136,7 +127,10 @@ impl MemTable {
     /// Flush the mem-table to SSTable. Implement in week 1 day 6.
     pub fn flush(&self, builder: &mut SsTableBuilder) -> Result<()> {
         for entry in self.map.iter() {
-            builder.add(KeySlice::create(&entry.key()[..]), &entry.value()[..]);
+            builder.add(
+                KeySlice::from_slice(&entry.key()[..], TS_DEFAULT),
+                &entry.value()[..],
+            );
         }
         Ok(())
     }
@@ -174,6 +168,7 @@ pub struct MemTableIterator {
     /// Stores the current key-value pair.
     item: (Bytes, Bytes),
 }
+
 impl MemTableIterator {
     fn entry_to_item(entry: Option<Entry<'_, Bytes, Bytes>>) -> (Bytes, Bytes) {
         entry
@@ -181,6 +176,7 @@ impl MemTableIterator {
             .unwrap_or_else(|| (Bytes::from_static(&[]), Bytes::from_static(&[])))
     }
 }
+
 impl StorageIterator for MemTableIterator {
     type KeyType<'a> = KeySlice<'a>;
 
@@ -189,7 +185,7 @@ impl StorageIterator for MemTableIterator {
     }
 
     fn key(&self) -> KeySlice {
-        Key::create(&self.borrow_item().0[..])
+        KeySlice::from_slice(&self.borrow_item().0[..], TS_DEFAULT)
     }
 
     fn is_valid(&self) -> bool {

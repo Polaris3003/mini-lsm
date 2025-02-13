@@ -1,5 +1,6 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+
+use serde::{Deserialize, Serialize};
 
 use crate::lsm_storage::LsmStorageState;
 
@@ -34,18 +35,21 @@ impl SimpleLeveledCompactionController {
     /// Returns `None` if no compaction needs to be scheduled. The order of SSTs in the compaction task id vector matters.
     pub fn generate_compaction_task(
         &self,
-        _snapshot: &LsmStorageState,
+        snapshot: &LsmStorageState,
     ) -> Option<SimpleLeveledCompactionTask> {
         let mut level_sizes = Vec::new();
-        level_sizes.push(_snapshot.l0_sstables.len());
-        for level in &_snapshot.levels {
-            level_sizes.push(level.1.len());
+        level_sizes.push(snapshot.l0_sstables.len());
+        for (_, files) in &snapshot.levels {
+            level_sizes.push(files.len());
         }
 
         for i in 0..self.options.max_levels {
-            if i == 0 && level_sizes[0] < self.options.level0_file_num_compaction_trigger {
+            if i == 0
+                && snapshot.l0_sstables.len() < self.options.level0_file_num_compaction_trigger
+            {
                 continue;
             }
+
             let lower_level = i + 1;
             let size_ratio = level_sizes[lower_level] as f64 / level_sizes[i] as f64;
             if size_ratio < self.options.size_ratio_percent as f64 / 100.0 {
@@ -56,12 +60,12 @@ impl SimpleLeveledCompactionController {
                 return Some(SimpleLeveledCompactionTask {
                     upper_level: if i == 0 { None } else { Some(i) },
                     upper_level_sst_ids: if i == 0 {
-                        _snapshot.l0_sstables.clone()
+                        snapshot.l0_sstables.clone()
                     } else {
-                        _snapshot.levels[i - 1].1.clone()
+                        snapshot.levels[i - 1].1.clone()
                     },
                     lower_level,
-                    lower_level_sst_ids: _snapshot.levels[lower_level - 1].1.clone(),
+                    lower_level_sst_ids: snapshot.levels[lower_level - 1].1.clone(),
                     is_lower_level_bottom_level: lower_level == self.options.max_levels,
                 });
             }

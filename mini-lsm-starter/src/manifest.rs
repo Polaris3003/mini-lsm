@@ -1,16 +1,14 @@
-#![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
-
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::compact::CompactionTask;
 use anyhow::{bail, Context, Result};
 use bytes::{Buf, BufMut};
 use parking_lot::{Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
-use serde_json::Deserializer;
+
+use crate::compact::CompactionTask;
 
 pub struct Manifest {
     file: Arc<Mutex<File>>,

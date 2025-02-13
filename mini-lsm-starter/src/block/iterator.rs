@@ -1,26 +1,25 @@
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use std::sync::Arc;
 
-use crate::block::SIZEOF_U16;
 use bytes::Buf;
 
-use crate::key::{KeySlice, KeyVec};
+use crate::{
+    block::SIZEOF_U16,
+    key::{KeySlice, KeyVec},
+};
 
 use super::Block;
 
 /// Iterates on a block.
 pub struct BlockIterator {
-    /// The internal `Block`, wrapped by an `Arc`
+    /// reference to the block
     block: Arc<Block>,
-    /// The current key, empty represents the iterator is invalid
+    /// the current key at the iterator position
     key: KeyVec,
-    /// the current value range in the block.data, corresponds to the current key
+    /// the value range from the block
     value_range: (usize, usize),
-    /// Current index of the key-value pair, should be in range of [0, num_of_elements)
+    /// the current index at the iterator position
     idx: usize,
-    /// The first key in the block
+    /// the first key in the block
     first_key: KeyVec,
 }
 
@@ -28,9 +27,10 @@ impl Block {
     fn get_first_key(&self) -> KeyVec {
         let mut buf = &self.data[..];
         buf.get_u16();
-        let key_len = buf.get_u16();
-        let key = &buf[..key_len as usize];
-        KeyVec::from_vec(key.to_vec())
+        let key_len = buf.get_u16() as usize;
+        let key = &buf[..key_len];
+        buf.advance(key_len);
+        KeyVec::from_vec_with_ts(key.to_vec(), buf.get_u64())
     }
 }
 
@@ -72,7 +72,6 @@ impl BlockIterator {
     }
 
     /// Returns true if the iterator is valid.
-    /// Note: You may want to make use of `key`
     pub fn is_valid(&self) -> bool {
         !self.key.is_empty()
     }
@@ -104,23 +103,27 @@ impl BlockIterator {
     /// Index update will be handled by caller
     fn seek_to_offset(&mut self, offset: usize) {
         let mut entry = &self.block.data[offset..];
+        // Since `get_u16()` will automatically move the ptr 2 bytes ahead here,
+        // we don't need to manually advance it
         let overlap_len = entry.get_u16() as usize;
         let key_len = entry.get_u16() as usize;
-        let key = entry[..key_len].to_vec();
-        entry.advance(key_len);
+        let key = &entry[..key_len];
         self.key.clear();
-        self.key.append(&self.first_key.raw_ref()[..overlap_len]);
-        self.key.append(&key);
+        self.key.append(&self.first_key.key_ref()[..overlap_len]);
+        self.key.append(key);
+        entry.advance(key_len);
+        let ts = entry.get_u64();
+        self.key.set_ts(ts);
         let value_len = entry.get_u16() as usize;
-        let value_offset_begin = offset + SIZEOF_U16 + SIZEOF_U16 + key_len + SIZEOF_U16;
+        // REMEMBER TO CHANGE THIS every time you change the encoding!
+        let value_offset_begin =
+            offset + SIZEOF_U16 + SIZEOF_U16 + std::mem::size_of::<u64>() + key_len + SIZEOF_U16;
         let value_offset_end = value_offset_begin + value_len;
         self.value_range = (value_offset_begin, value_offset_end);
         entry.advance(value_len);
     }
 
-    /// Seek to the first key that >= `key`.
-    /// Note: You should assume the key-value pairs in the block are sorted when being added by
-    /// callers.
+    /// Seek to the first key that is >= `key`.
     pub fn seek_to_key(&mut self, key: KeySlice) {
         let mut low = 0;
         let mut high = self.block.offsets.len();

@@ -1,11 +1,8 @@
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
-use crate::block::SIZEOF_U16;
-use crate::key::{KeySlice, KeyVec};
 use bytes::BufMut;
 
-use super::Block;
+use crate::key::{KeySlice, KeyVec};
+
+use super::{Block, SIZEOF_U16};
 
 /// Builds a block.
 pub struct BlockBuilder {
@@ -19,13 +16,13 @@ pub struct BlockBuilder {
     first_key: KeyVec,
 }
 
-fn compute_overlap(first_key: KeyVec, key: KeySlice) -> usize {
+fn compute_overlap(first_key: KeySlice, key: KeySlice) -> usize {
     let mut i = 0;
     loop {
-        if i >= first_key.len() || i >= key.len() {
+        if i >= first_key.key_len() || i >= key.key_len() {
             break;
         }
-        if first_key.raw_ref()[i] != key.raw_ref()[i] {
+        if first_key.key_ref()[i] != key.key_ref()[i] {
             break;
         }
         i += 1;
@@ -53,31 +50,35 @@ impl BlockBuilder {
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
         assert!(!key.is_empty(), "key must not be empty");
-        if self.estimated_size() + key.len() + value.len() + SIZEOF_U16 * 3 > self.block_size
+        if self.estimated_size() + key.raw_len() + value.len() + SIZEOF_U16 * 3 /* key_len, value_len and offset */ > self.block_size
             && !self.is_empty()
         {
             return false;
         }
         // Add the offset of the data into the offset array.
         self.offsets.push(self.data.len() as u16);
-        let overlap = compute_overlap(self.first_key.clone(), key);
+        let overlap = compute_overlap(self.first_key.as_key_slice(), key);
         // Encode key overlap.
         self.data.put_u16(overlap as u16);
         // Encode key length.
-        self.data.put_u16((key.len() - overlap) as u16);
+        self.data.put_u16((key.key_len() - overlap) as u16);
         // Encode key content.
-        self.data.put(&key.raw_ref()[overlap..]);
+        self.data.put(&key.key_ref()[overlap..]);
+        // Encode key ts
+        self.data.put_u64(key.ts());
         // Encode value length.
         self.data.put_u16(value.len() as u16);
         // Encode value content.
         self.data.put(value);
+
         if self.first_key.is_empty() {
             self.first_key = key.to_key_vec();
         }
+
         true
     }
 
-    /// Check if there is no key-value pair in the block.
+    /// Check if there are no key-value pairs in the block.
     pub fn is_empty(&self) -> bool {
         self.offsets.is_empty()
     }

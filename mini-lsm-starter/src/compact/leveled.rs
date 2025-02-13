@@ -1,6 +1,8 @@
-use crate::lsm_storage::LsmStorageState;
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+
+use serde::{Deserialize, Serialize};
+
+use crate::lsm_storage::LsmStorageState;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LeveledCompactionTask {
@@ -63,8 +65,8 @@ impl LeveledCompactionController {
         &self,
         snapshot: &LsmStorageState,
     ) -> Option<LeveledCompactionTask> {
-        // compute target level size
-        let mut target_level_size = (0..self.options.max_levels).map(|_| 0).collect::<Vec<_>>();
+        // step 1: compute target level size
+        let mut target_level_size = (0..self.options.max_levels).map(|_| 0).collect::<Vec<_>>(); // exclude level 0
         let mut real_level_size = Vec::with_capacity(self.options.max_levels);
         let mut base_level = self.options.max_levels;
         for i in 0..self.options.max_levels {
@@ -76,7 +78,7 @@ impl LeveledCompactionController {
                     .sum::<u64>() as usize,
             );
         }
-        let base_level_size_bytes = self.options.base_level_size_mb as usize * 1024 * 1024;
+        let base_level_size_bytes = self.options.base_level_size_mb * 1024 * 1024;
 
         // select base level and compute target level size
         target_level_size[self.options.max_levels - 1] =
@@ -92,6 +94,7 @@ impl LeveledCompactionController {
             }
         }
 
+        // Flush L0 SST is the top priority
         if snapshot.l0_sstables.len() >= self.options.level0_file_num_compaction_trigger {
             println!("flush L0 SST to base level {}", base_level);
             return Some(LeveledCompactionTask {
@@ -106,6 +109,7 @@ impl LeveledCompactionController {
                 is_lower_level_bottom_level: base_level == self.options.max_levels,
             });
         }
+
         let mut priorities = Vec::with_capacity(self.options.max_levels);
         for level in 0..self.options.max_levels {
             let prio = real_level_size[level] as f64 / target_level_size[level] as f64;
@@ -120,14 +124,15 @@ impl LeveledCompactionController {
                 "target level sizes: {:?}, real level sizes: {:?}, base_level: {}",
                 target_level_size
                     .iter()
-                    .map(|x| format!("{}MB", x / 1024 / 1024))
+                    .map(|x| format!("{:.3}MB", *x as f64 / 1024.0 / 1024.0))
                     .collect::<Vec<_>>(),
                 real_level_size
                     .iter()
-                    .map(|x| format!("{}MB", x / 1024 / 1024))
+                    .map(|x| format!("{:.3}MB", *x as f64 / 1024.0 / 1024.0))
                     .collect::<Vec<_>>(),
                 base_level,
             );
+
             let level = *level;
             let selected_sst = snapshot.levels[level - 1].1.iter().min().copied().unwrap(); // select the oldest sst to compact
             println!(
@@ -195,8 +200,10 @@ impl LeveledCompactionController {
             assert!(upper_level_sst_ids_set.is_empty());
             snapshot.l0_sstables = new_l0_ssts;
         }
+
         files_to_remove.extend(&task.upper_level_sst_ids);
         files_to_remove.extend(&task.lower_level_sst_ids);
+
         let mut new_lower_level_ssts = snapshot.levels[task.lower_level - 1]
             .1
             .iter()

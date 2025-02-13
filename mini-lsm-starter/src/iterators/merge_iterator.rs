@@ -1,6 +1,3 @@
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use std::cmp::{self};
 use std::collections::binary_heap::PeekMut;
 use std::collections::BinaryHeap;
@@ -15,30 +12,32 @@ struct HeapWrapper<I: StorageIterator>(pub usize, pub Box<I>);
 
 impl<I: StorageIterator> PartialEq for HeapWrapper<I> {
     fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == cmp::Ordering::Equal
+        self.partial_cmp(other).unwrap() == cmp::Ordering::Equal
     }
 }
 
 impl<I: StorageIterator> Eq for HeapWrapper<I> {}
 
 impl<I: StorageIterator> PartialOrd for HeapWrapper<I> {
+    #[allow(clippy::non_canonical_partial_ord_impl)]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
+        match self.1.key().cmp(&other.1.key()) {
+            cmp::Ordering::Greater => Some(cmp::Ordering::Greater),
+            cmp::Ordering::Less => Some(cmp::Ordering::Less),
+            cmp::Ordering::Equal => self.0.partial_cmp(&other.0),
+        }
+        .map(|x| x.reverse())
     }
 }
 
 impl<I: StorageIterator> Ord for HeapWrapper<I> {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        self.1
-            .key()
-            .cmp(&other.1.key())
-            .then(self.0.cmp(&other.0))
-            .reverse()
+        self.partial_cmp(other).unwrap()
     }
 }
 
 /// Merge multiple iterators of the same type. If the same key occurs multiple times in some
-/// iterators, prefer the one with smaller index.
+/// iterators, perfer the one with smaller index.
 pub struct MergeIterator<I: StorageIterator> {
     iters: BinaryHeap<HeapWrapper<I>>,
     current: Option<HeapWrapper<I>>,
@@ -56,6 +55,7 @@ impl<I: StorageIterator> MergeIterator<I> {
         let mut heap = BinaryHeap::new();
 
         if iters.iter().all(|x| !x.is_valid()) {
+            // All invalid, select the last one as the current.
             let mut iters = iters;
             return Self {
                 iters: heap,
@@ -99,6 +99,7 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
 
     fn next(&mut self) -> Result<()> {
         let current = self.current.as_mut().unwrap();
+        // Pop the item out of the heap if they have the same value.
         while let Some(mut inner_iter) = self.iters.peek_mut() {
             debug_assert!(
                 inner_iter.1.key() >= current.1.key(),
@@ -110,6 +111,7 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
                     PeekMut::pop(inner_iter);
                     return e;
                 }
+
                 // Case 2: iter is no longer valid.
                 if !inner_iter.1.is_valid() {
                     PeekMut::pop(inner_iter);
@@ -128,12 +130,14 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
             }
             return Ok(());
         }
+
         // Otherwise, compare with heap top and swap if necessary.
         if let Some(mut inner_iter) = self.iters.peek_mut() {
             if *current < *inner_iter {
                 std::mem::swap(&mut *inner_iter, current);
             }
         }
+
         Ok(())
     }
 

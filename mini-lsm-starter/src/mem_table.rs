@@ -10,7 +10,7 @@ use crossbeam_skiplist::SkipMap;
 use ouroboros::self_referencing;
 
 use crate::iterators::StorageIterator;
-use crate::key::{Key, KeyBytes, KeySlice, TS_DEFAULT};
+use crate::key::{KeyBytes, KeySlice, TS_DEFAULT};
 use crate::table::SsTableBuilder;
 use crate::wal::Wal;
 
@@ -19,7 +19,7 @@ use crate::wal::Wal;
 /// An initial implementation of memtable is part of week 1, day 1. It will be incrementally implemented in other
 /// chapters of week 1 and week 2.
 pub struct MemTable {
-    map: Arc<SkipMap<KeyBytes, Bytes>>,
+    pub(crate) map: Arc<SkipMap<KeyBytes, Bytes>>,
     wal: Option<Wal>,
     id: usize,
     approximate_size: Arc<AtomicUsize>,
@@ -69,14 +69,6 @@ impl MemTable {
         }
     }
 
-    pub fn get(&self, key: KeySlice) -> Option<Bytes> {
-        let key_bytes = KeyBytes::from_bytes_with_ts(
-            Bytes::from_static(unsafe { std::mem::transmute(key.key_ref()) }),
-            key.ts(),
-        );
-        self.map.get(&key_bytes).map(|e| e.value().clone())
-    }
-
     /// Create a new mem-table with WAL
     pub fn create_with_wal(id: usize, path: impl AsRef<Path>) -> Result<Self> {
         Ok(Self {
@@ -96,6 +88,15 @@ impl MemTable {
             map,
             approximate_size: Arc::new(AtomicUsize::new(0)),
         })
+    }
+
+    /// Get a value by key. Should not be used in week 3.
+    pub fn get(&self, key: KeySlice) -> Option<Bytes> {
+        let key_bytes = KeyBytes::from_bytes_with_ts(
+            Bytes::from_static(unsafe { std::mem::transmute(key.key_ref()) }),
+            key.ts(),
+        );
+        self.map.get(&key_bytes).map(|e| e.value().clone())
     }
 
     pub fn for_testing_put_slice(&self, key: &[u8], value: &[u8]) -> Result<()> {

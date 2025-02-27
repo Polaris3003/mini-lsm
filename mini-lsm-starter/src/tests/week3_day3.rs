@@ -4,7 +4,13 @@ use bytes::Bytes;
 use tempfile::tempdir;
 
 use crate::{
-    compact::CompactionOptions, iterators::StorageIterator, key::KeySlice, lsm_iterator, lsm_storage::{LsmStorageOptions, MiniLsm}, table::{SsTableBuilder, SsTableIterator}, tests::harness::check_lsm_iter_result_by_key
+    compact::CompactionOptions,
+    iterators::StorageIterator,
+    key::KeySlice,
+    lsm_iterator,
+    lsm_storage::{LsmStorageOptions, MiniLsm},
+    table::{SsTableBuilder, SsTableIterator},
+    tests::harness::check_lsm_iter_result_by_key,
 };
 
 #[test]
@@ -142,10 +148,11 @@ fn test_task2_lsm_iterator_mvcc() {
     storage.put(b"c", b"1").unwrap();
     let snapshot3 = storage.new_txn().unwrap();
     storage.force_flush().unwrap();
-    let  s = storage.inner.state.read();
+    let s = storage.inner.state.read();
     println!("l0_tables count {}", s.l0_sstables.len());
     for table_id in s.l0_sstables.iter() {
-        let mut iter = SsTableIterator::create_and_seek_to_first(s.sstables[table_id].clone()).unwrap();
+        let mut iter =
+            SsTableIterator::create_and_seek_to_first(s.sstables[table_id].clone()).unwrap();
         println!("table: {:?}", table_id);
         while iter.is_valid() {
             println!("key: {:?}, value: {:?}", iter.key(), iter.value());
@@ -193,10 +200,11 @@ fn test_task2_lsm_iterator_mvcc() {
     storage.put(b"c", b"5").unwrap();
     let snapshot6 = storage.new_txn().unwrap();
     storage.force_flush().unwrap();
-    let  s = storage.inner.state.read();
+    let s = storage.inner.state.read();
     println!("l0_tables count {}", s.l0_sstables.len());
     for table_id in s.l0_sstables.iter() {
-        let mut iter = SsTableIterator::create_and_seek_to_first(s.sstables[table_id].clone()).unwrap();
+        let mut iter =
+            SsTableIterator::create_and_seek_to_first(s.sstables[table_id].clone()).unwrap();
         println!("table: {:?}", table_id);
         while iter.is_valid() {
             println!("key: {:?}, value: {:?}", iter.key(), iter.value());

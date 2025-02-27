@@ -120,12 +120,35 @@ impl LsmStorageInner {
     ) -> Result<Vec<Arc<SsTable>>> {
         let mut builder = None;
         let mut new_sst = Vec::new();
+        let watermark = self.mvcc().watermark();
         let mut last_key = Vec::<u8>::new();
+        let mut first_ket_below_watermark = false;
         while iter.is_valid() {
             if builder.is_none() {
                 builder = Some(SsTableBuilder::new(self.options.block_size));
             }
             let same_as_last_key = iter.key().key_ref() == last_key;
+            if !same_as_last_key {
+                first_ket_below_watermark = true;
+            }
+            if compact_to_bottom_level
+                && !same_as_last_key
+                && iter.key().ts() <= watermark
+                && iter.value().is_empty()
+            {
+                last_key.clear();
+                last_key.extend(iter.key().key_ref());
+                iter.next()?;
+                first_ket_below_watermark = false;
+                continue;
+            }
+            if same_as_last_key && iter.key().ts() <= watermark {
+                if !first_ket_below_watermark {
+                    iter.next()?;
+                    continue;
+                }
+                first_ket_below_watermark = false;
+            }
             let builder_inner = builder.as_mut().unwrap();
 
             if builder_inner.estimated_size() >= self.options.target_sst_size && !same_as_last_key {
@@ -350,9 +373,7 @@ impl LsmStorageInner {
             *state = Arc::new(snapshot);
             drop(state);
             self.sync_dir()?;
-            self.manifest
-                .as_ref()
-                .unwrap()
+            self.manifest()
                 .add_record(&state_lock, ManifestRecord::Compaction(task, new_sst_ids))?;
             ssts_to_remove
         };

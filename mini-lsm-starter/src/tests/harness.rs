@@ -167,10 +167,6 @@ where
         );
         iter.next().unwrap();
     }
-    // while iter.is_valid() {
-    //     println!("key: {:?}, value: {:?}", iter.key(), iter.value());
-    //     iter.next().unwrap();
-    // }
     assert!(!iter.is_valid());
 }
 

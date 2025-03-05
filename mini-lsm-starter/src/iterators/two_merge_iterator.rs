@@ -59,8 +59,10 @@ impl<
 
     fn key(&self) -> Self::KeyType<'_> {
         if self.choose_a {
+            debug_assert!(self.a.is_valid());
             self.a.key()
         } else {
+            debug_assert!(self.a.is_valid());
             self.b.key()
         }
     }
